@@ -11,4 +11,4 @@ sudo ./install-cni-plugin.sh v1.1.7 v0.8.7
 sudo apt install apache2 -y
 sudo ufw allow 'Apache'
 cd /var/www/html
-sudo echo "<html><h1>Hello AWS Study - Welcome To My Webpage</h1><body>`hostnamectl`</body></html>" > index.html
+echo "<html><h1>Hello AWS Study - Welcome To My Webpage</h1><body>`hostnamectl`</body></html>" | sudo tee index.html
