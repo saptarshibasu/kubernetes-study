@@ -121,4 +121,6 @@
 
 ## References
 
-* Ibryam, Bilgin; Huß, Roland. Kubernetes Patterns (Kindle Locations 602-604). O'Reilly Media. Kindle Edition. 
+* Ibryam, Bilgin; Huß, Roland. Kubernetes Patterns (Kindle Locations 602-604). O'Reilly Media. Kindle Edition.
+* https://github.com/kelseyhightower/kubernetes-the-hard-way
+* https://docs.google.com/spreadsheets/d/1hoyNr0xBLKEZNjefiqQTYweGmWQ4Qc-6LVgkuQSm99o/edit#gid=491339265

@@ -1,0 +1,334 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+		"service": {
+            "defaultValue": "kube",
+            "type": "string",
+            "metadata": {
+                 "description": "The name of the service."
+            }
+		},
+		"environment": {
+            "defaultValue": "dev",
+            "type": "string",
+            "metadata": {
+                 "description": "The name of the environment."
+            }
+		},
+		"controllerNodeNo": {
+            "defaultValue": 3,
+            "type": "int",
+            "metadata": {
+                 "description": "Number of controller nodes."
+            }
+		},
+		"workerNodeNo": {
+            "defaultValue": 2,
+            "type": "int",
+            "metadata": {
+                 "description": "Number of worker nodes."
+            }
+		},
+		"maxPodPerNode": {
+            "defaultValue": 3,
+            "type": "int",
+            "metadata": {
+                 "description": "Maximum number of pods per node."
+            }
+        },
+        "location": {
+            "defaultValue": "[resourceGroup().location]",
+            "type": "string",
+            "metadata": {
+                 "description": "The geographical region of the resources."
+            }
+        },
+        "vmSize": {
+            "defaultValue": "Standard_D2s_v3",
+            "type": "string",
+            "metadata": {
+                 "description": "The size of the virtual machine."
+            }
+        }
+    },
+    "variables": {
+	    "envComponent": "[concat(parameters('service'), '-', parameters('environment'))]",
+	    "vNetPrefix": "[concat('vnet', '-', variables('envComponent') , '-')]",
+		"subnetPrefix": "[concat('snet', '-', variables('envComponent') , '-')]",
+	    "bastionHostPrefix": "[concat('bhost', '-', variables('envComponent') , '-')]",
+		"securityGroupPrefix": "[concat('nsg', '-', variables('envComponent') , '-')]",
+		"networkInterfacePrefix": "[concat('ni', '-', variables('envComponent') , '-')]",
+		"publicIPPrefix": "[concat('pip', '-', variables('envComponent') , '-')]",
+		"vmPrefix": "[concat('vm', '-', variables('envComponent') , '-')]",
+		"shutdownSchedulePrefix": "[concat('sdsch', '-', variables('envComponent') , '-')]",
+		"osDiskPrefix": "[concat('osdisk', '-', variables('envComponent') , '-')]",
+        "ipConfig": "[concat('ipConfig', '-', variables('envComponent') , '-')]",
+        "cniDeploymentScriptLoc": "https://",
+        "adminUserName": "myazure"
+	},
+    "resources": [
+        {
+            "type": "Microsoft.Network/networkSecurityGroups",
+            "apiVersion": "2020-05-01",
+            "name": "[concat(variables('securityGroupPrefix'), copyIndex())]",
+            "location": "[parameters('location')]",
+			"copy": {
+                "name": "networkSecurityGroupCopy",
+                "count": "[add(parameters('controllerNodeNo'), parameters('workerNodeNo'))]"
+            }
+        },
+        {
+            "type": "Microsoft.Network/publicIPAddresses",
+            "apiVersion": "2020-05-01",
+            "name": "[concat(variables('publicIPPrefix'), '0')]",
+            "location": "[parameters('location')]",
+            "sku": {
+                "name": "Standard"
+            },
+            "properties": {
+                "publicIPAddressVersion": "IPv4",
+                "publicIPAllocationMethod": "Static",
+                "idleTimeoutInMinutes": 4
+            }
+        },
+        {
+            "type": "Microsoft.Network/virtualNetworks",
+            "apiVersion": "2020-05-01",
+            "name": "[concat(variables('vNetPrefix'), '0')]",
+            "location": "[parameters('location')]",
+            "properties": {
+                "addressSpace": {
+                    "addressPrefixes": [
+                        "10.0.0.0/16"
+                    ]
+                },
+                "subnets": [
+                    {
+                        "name": "[concat(variables('subnetPrefix'), '0')]",
+                        "properties": {
+                            "addressPrefix": "10.0.1.0/24",
+                            "privateEndpointNetworkPolicies": "Enabled",
+                            "privateLinkServiceNetworkPolicies": "Enabled"
+                        }
+                    },
+                    {
+                        "name": "AzureBastionSubnet",
+                        "properties": {
+                            "addressPrefix": "10.0.0.0/24",
+                            "privateEndpointNetworkPolicies": "Enabled",
+                            "privateLinkServiceNetworkPolicies": "Enabled"
+                        }
+                    }
+                ],
+                "enableDdosProtection": false,
+                "enableVmProtection": false
+            }
+        },
+        {
+            "type": "Microsoft.Compute/virtualMachines",
+            "apiVersion": "2019-07-01",
+            "name": "[concat(variables('vmPrefix'), copyIndex())]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "networkInterfacesCopy"
+            ],
+            "properties": {
+                "hardwareProfile": {
+                    "vmSize": "[parameters('vmSize')]"
+                },
+                "storageProfile": {
+                    "imageReference": {
+                        "publisher": "Canonical",
+                        "offer": "UbuntuServer",
+                        "sku": "18.04-LTS",
+                        "version": "latest"
+                    },
+                    "osDisk": {
+                        "osType": "Linux",
+                        "name": "[concat(variables('osDiskPrefix'), copyIndex())]",
+                        "createOption": "FromImage",
+                        "caching": "ReadWrite",
+                        "managedDisk": {
+                            "storageAccountType": "Premium_LRS"
+						},
+                        "diskSizeGB": 30
+                    }
+                },
+                "osProfile": {
+                    "computerName": "[concat(variables('vmPrefix'), copyIndex())]",
+                    "adminUsername": "[variables('adminUserName')]",
+                    "linuxConfiguration": {
+                        "disablePasswordAuthentication": false,
+                        "provisionVMAgent": true
+                    },
+                    "allowExtensionOperations": true,
+                    "requireGuestProvisionSignal": true
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(variables('networkInterfacePrefix'), copyIndex()))]"
+                        }
+                    ]
+                },
+                "diagnosticsProfile": {
+                    "bootDiagnostics": {
+                        "enabled": true
+                    }
+                }
+            },
+			"copy": {
+                "name": "vmCopy",
+                "count": "[add(parameters('controllerNodeNo'), parameters('workerNodeNo'))]"
+            }
+        },
+        {
+            "type": "Microsoft.Compute/virtualMachines/extensions",
+            "apiVersion": "2019-07-01",
+            "name": "[concat(variables('vmPrefix'), copyIndex(), '/AzureNetworkWatcherExtension')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "vmCopy"
+            ],
+            "properties": {
+                "autoUpgradeMinorVersion": true,
+                "publisher": "Microsoft.Azure.NetworkWatcher",
+                "type": "NetworkWatcherAgentLinux",
+                "typeHandlerVersion": "1.4"
+            },
+			"copy": {
+                "name": "vmNetworkWatcherExtCopy",
+                "count": "[add(parameters('controllerNodeNo'), parameters('workerNodeNo'))]"
+            }
+        },
+        {
+            "type": "Microsoft.Compute/virtualMachines/extensions",
+            "apiVersion": "2019-07-01",
+            "name": "[concat(variables('vmPrefix'), copyIndex(), '/CustomScriptExtension')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "vmCopy"
+            ],
+            "properties": {
+                "autoUpgradeMinorVersion": true,
+                "publisher": "Microsoft.Azure.Extensions",
+                "type": "CustomScript",
+                "typeHandlerVersion": "2.1",
+                "settings": {
+                    "skipDos2Unix":false
+                  },
+                "protectedSettings": {
+                    "commandToExecute": "bash cni_deployment.sh",
+                    "fileUris": ["[variables('cniDeploymentScriptLoc')]"]
+                }
+            },
+			"copy": {
+                "name": "vmCustomScriptExtCopy",
+                "count": "[add(parameters('controllerNodeNo'), parameters('workerNodeNo'))]"
+            }
+        },
+        {
+            "type": "Microsoft.Network/virtualNetworks/subnets",
+            "apiVersion": "2020-05-01",
+            "name": "[concat(variables('vNetPrefix'), '0', '/AzureBastionSubnet')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/virtualNetworks', concat(variables('vNetPrefix'), '0'))]"
+            ],
+            "properties": {
+                "addressPrefix": "10.0.0.0/24",
+                "privateEndpointNetworkPolicies": "Enabled",
+                "privateLinkServiceNetworkPolicies": "Enabled"
+            }
+        },
+        {
+            "type": "Microsoft.Network/virtualNetworks/subnets",
+            "apiVersion": "2020-05-01",
+            "name": "[concat(variables('vNetPrefix'), '0', '/', variables('subnetPrefix'), '0')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/virtualNetworks', concat(variables('vNetPrefix'), '0'))]"
+            ],
+            "properties": {
+                "addressPrefix": "10.0.1.0/24",
+                "privateEndpointNetworkPolicies": "Enabled",
+                "privateLinkServiceNetworkPolicies": "Enabled"
+            }
+        },
+        {
+            "type": "Microsoft.Network/bastionHosts",
+            "apiVersion": "2020-05-01",
+            "name": "[concat(variables('bastionHostPrefix'), '0')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/publicIPAddresses', concat(variables('publicIPPrefix'), '0'))]",
+                "[resourceId('Microsoft.Network/virtualNetworks/subnets', concat(variables('vNetPrefix'), '0'), 'AzureBastionSubnet')]"
+            ],
+            "properties": {
+                "dnsName": "bst-9aeb07a6-ebec-479f-aa34-b676bf140c36.bastion.azure.com",
+                "ipConfigurations": [
+                    {
+                        "name": "IpConf",
+                        "properties": {
+                            "privateIPAllocationMethod": "Dynamic",
+                            "publicIPAddress": {
+                                "id": "[resourceId('Microsoft.Network/publicIPAddresses', concat(variables('publicIPPrefix'), '0'))]"
+                            },
+                            "subnet": {
+                                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', concat(variables('vNetPrefix'), '0'), 'AzureBastionSubnet')]"
+                            }
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Network/networkInterfaces",
+            "apiVersion": "2020-05-01",
+            "name": "[concat(variables('networkInterfacePrefix'), copyIndex())]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/virtualNetworks/subnets', concat(variables('vNetPrefix'), '0'), concat(variables('subnetPrefix'), '0'))]",
+                "[resourceId('Microsoft.Network/networkSecurityGroups', concat(variables('securityGroupPrefix'), copyIndex()))]"
+            ],
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "[concat(variables('ipConfig'), '0')]",
+                        "properties": {
+                            "privateIPAllocationMethod": "Dynamic",
+                            "subnet": {
+                                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', concat(variables('vNetPrefix'), '0'), concat(variables('subnetPrefix'), '0'))]"
+                            },
+                            "primary": true,
+                            "privateIPAddressVersion": "IPv4"
+                        }
+                    },
+                    {
+                        "name": "[concat(variables('ipConfig'), copyIndex())]",
+                        "properties": {
+                            "privateIPAllocationMethod": "Dynamic",
+                            "subnet": {
+                                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', concat(variables('vNetPrefix'), '0'), concat(variables('subnetPrefix'), '0'))]"
+                            },
+                            "primary": false,
+                            "privateIPAddressVersion": "IPv4"
+                        },
+						"copy": {
+							"name": "ipConfigCopy",
+							"count": "[add(parameters('maxPodPerNode'))]"
+						}						
+                    }
+                ],
+                "enableAcceleratedNetworking": false,
+                "enableIPForwarding": false,
+                "networkSecurityGroup": {
+                    "id": "[resourceId('Microsoft.Network/networkSecurityGroups', concat(variables('securityGroupPrefix'), copyIndex()))]"
+                }
+            },
+			"copy": {
+                "name": "networkInterfacesCopy",
+                "count": "[add(parameters('controllerNodeNo'), parameters('workerNodeNo'))]"
+            }
+        }
+    ]
+}
