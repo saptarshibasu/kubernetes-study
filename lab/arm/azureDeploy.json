@@ -17,14 +17,14 @@
             }
         },
         "controllerNodeNo": {
-            "defaultValue": 3,
+            "defaultValue": 1,
             "type": "int",
             "metadata": {
                  "description": "Number of controller nodes."
             }
         },
         "workerNodeNo": {
-            "defaultValue": 2,
+            "defaultValue": 1,
             "type": "int",
             "metadata": {
                  "description": "Number of worker nodes."
@@ -58,11 +58,18 @@
                  "description": "The admin password for virtual machines."
             }
         },
-        "customData": {
-            "defaultValue": "wget https://raw.githubusercontent.com/saptarshibasu/kubernetes-study/master/lab/script/cni_deployment.sh; sh cni_deployment.sh",
+        "deploymentScript": {
+            "defaultValue": "https://raw.githubusercontent.com/saptarshibasu/kubernetes-study/master/lab/script/cni_deployment.sh",
             "type": "string",
             "metadata": {
                 "description": "Script to deploy CNI plugin for container IP."
+           }
+        },
+        "commandToExecute": {
+            "defaultValue": "sh cni_deployment.sh",
+            "type": "string",
+            "metadata": {
+                "description": "The deployment command to be invoked."
            }
         }
     },
@@ -77,7 +84,8 @@
         "vmPrefix": "[concat('vm', '-', variables('envComponent') , '-')]",
         "shutdownSchedulePrefix": "[concat('shutdown-computevm', '-', variables('vmPrefix'))]",
         "osDiskPrefix": "[concat('osdisk', '-', variables('envComponent') , '-')]",
-        "ipConfig": "[concat('ipConfig', '-', variables('envComponent') , '-')]"
+        "ipConfigPrefix": "[concat('ipConfig', '-', variables('envComponent') , '-')]",
+        "storageAcName": "storagekubedev"
     },
     "resources": [
         {
@@ -171,7 +179,6 @@
                     "computerName": "[concat(variables('vmPrefix'), copyIndex())]",
                     "adminUsername": "[parameters('adminUserName')]",
                     "adminPassword": "[parameters('adminPassword')]",
-                    "customData": "[base64(parameters('customData'))]",
                     "linuxConfiguration": {
                         "disablePasswordAuthentication": false,
                         "provisionVMAgent": true
@@ -184,10 +191,43 @@
                             "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(variables('networkInterfacePrefix'), copyIndex()))]"
                         }
                     ]
+                },
+                "diagnosticsProfile": {
+                    "bootDiagnostics": {
+                        "enabled": true,
+                        "storageUri": "[concat(reference(concat('Microsoft.Storage/storageAccounts/', variables('storageAcName')), '2019-06-01').primaryEndpoints.blob)]"
+                    }
                 }
             },
             "copy": {
                 "name": "vmCopy",
+                "count": "[add(parameters('controllerNodeNo'), parameters('workerNodeNo'))]"
+            }
+        },
+        {
+            "type": "Microsoft.Compute/virtualMachines/extensions",
+            "apiVersion": "2019-07-01",
+            "name": "[concat(variables('vmPrefix'), copyIndex(), '/CustomScript')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "vmCopy"
+            ],
+            "properties": {
+                "autoUpgradeMinorVersion": true,
+                "publisher": "Microsoft.Azure.Extensions",
+                "type": "CustomScript",
+                "typeHandlerVersion": "2.0",
+                "settings": {
+                    "fileUris": [
+                        "[parameters('deploymentScript')]"
+                    ]
+                },
+                "protectedSettings": {
+                    "commandToExecute": "[parameters('commandToExecute')]"
+                }
+            },
+            "copy": {
+                "name": "customScriptCopy",
                 "count": "[add(parameters('controllerNodeNo'), parameters('workerNodeNo'))]"
             }
         },
@@ -303,7 +343,7 @@
             "properties": {
                 "ipConfigurations": [
                     {
-                        "name": "[concat(variables('ipConfig'), 0)]",
+                        "name": "[concat(variables('ipConfigPrefix'), 0)]",
                         "properties": {
                             "privateIPAllocationMethod": "Dynamic",
                             "subnet": {
@@ -314,7 +354,7 @@
                         }
                     },
                     {
-                        "name": "[concat(variables('ipConfig'), 1)]",
+                        "name": "[concat(variables('ipConfigPrefix'), 1)]",
                         "properties": {
                             "privateIPAllocationMethod": "Dynamic",
                             "subnet": {
@@ -325,7 +365,7 @@
                         }
                     },
                     {
-                        "name": "[concat(variables('ipConfig'), 2)]",
+                        "name": "[concat(variables('ipConfigPrefix'), 2)]",
                         "properties": {
                             "privateIPAllocationMethod": "Dynamic",
                             "subnet": {
@@ -336,7 +376,7 @@
                         }
                     },
                     {
-                        "name": "[concat(variables('ipConfig'), 3)]",
+                        "name": "[concat(variables('ipConfigPrefix'), 3)]",
                         "properties": {
                             "privateIPAllocationMethod": "Dynamic",
                             "subnet": {
@@ -356,6 +396,41 @@
             "copy": {
                 "name": "networkInterfacesCopy",
                 "count": "[add(parameters('controllerNodeNo'), parameters('workerNodeNo'))]"
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "apiVersion": "2019-06-01",
+            "name": "[variables('storageAcName')]",
+            "location": "eastus",
+            "sku": {
+                "name": "Standard_LRS",
+                "tier": "Standard"
+            },
+            "kind": "StorageV2",
+            "properties": {
+                "isHnsEnabled": false,
+                "networkAcls": {
+                    "bypass": "AzureServices",
+                    "virtualNetworkRules": [],
+                    "ipRules": [],
+                    "defaultAction": "Allow"
+                },
+                "supportsHttpsTrafficOnly": true,
+                "encryption": {
+                    "services": {
+                        "file": {
+                            "keyType": "Account",
+                            "enabled": true
+                        },
+                        "blob": {
+                            "keyType": "Account",
+                            "enabled": true
+                        }
+                    },
+                    "keySource": "Microsoft.Storage"
+                },
+                "accessTier": "Hot"
             }
         }
     ]
