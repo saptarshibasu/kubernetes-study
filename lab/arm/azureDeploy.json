@@ -64,7 +64,7 @@
 		"shutdownSchedulePrefix": "[concat('sdsch', '-', variables('envComponent') , '-')]",
 		"osDiskPrefix": "[concat('osdisk', '-', variables('envComponent') , '-')]",
         "ipConfig": "[concat('ipConfig', '-', variables('envComponent') , '-')]",
-        "cniDeploymentScriptLoc": "https://",
+        "cniDeploymentScriptLoc": "https://raw.githubusercontent.com/saptarshibasu/kubernetes-study/master/lab/script/cni_deployment.sh",
         "adminUserName": "myazure"
 	},
     "resources": [
